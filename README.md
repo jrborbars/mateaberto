@@ -1,5 +1,6 @@
 # Door Access Control System v2.0
 
+
 Door access control running on a Rockchip RK322x TV box. An ESP8266 numeric keypad
 sends a user ID + PIN to a local Python API; on success a physical relay unlocks the door.
 
