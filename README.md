@@ -23,6 +23,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 ```
 
+
 ### 2. Configure environment
 
 Copy `.env` and adjust values:
