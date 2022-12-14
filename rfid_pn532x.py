@@ -18,12 +18,17 @@ try:
     print('DB is open and ok.')
 except OSError as err:
     print('DB was not opened.', str(err))
+
+db[b"MASTER"] = b"8:1a:83:35"
 # I2C adresses
 RFID_ID = 36 #0x24
 OLED_ID = 60 #0x3c
 ####################
 OLED_W = 128
 OLED_H = 64
+
+GRE_LED = machine.Pin(15, machine.Pin.OUT)
+RED_LED = machine.Pin(16, machine.Pin.OUT)
 #i2c = I2C( scl=Pin(5), sda=Pin(4), freq=1000000) # GPIO5 and GPIO4 (D1 and D2)
 i2c = SoftI2C( scl=Pin(18), sda=Pin(19), freq=1000000) # GPIO5 and GPIO4 (D1 and D2)
 i2c2 = SoftI2C(scl=Pin(22), sda=Pin(21), freq=1000000)
@@ -79,6 +84,8 @@ pn532.SAM_configuration()
 print("Waiting RFID/NFC card....")
 last_uid = None
 counter = 0
+save_mode = False
+MASTER = db[b"MASTER"]
 while True:
     uid = pn532.read_passive_target(timeout=0.5)
     if uid is None:
@@ -101,7 +108,27 @@ while True:
         #oled.text(suid,0,10)
         #oled.show()
         print(suid)
+        if save_mode:
+            save_mode = False
+            db_len = len(db)
+            db[bytes(db_len)] = suid
+            print("SAVED!")
+            print("SAVE MODE OFF!")
+            RED_LED.low()
+            time.slep(3)
+            GRE_LED.low()
+        else:
+            if bytes(suid) in db:
+                print("ACCESS GRANTED!")
+                GRE_LED.high()
+                time.sleep(3)
+                GRE_LED.low()
+            else:
+                print("ACCESS DENIED!")
     if counter == 10:
-        counter = 0;
+        counter = 0
+        save_mode = True
+        print("SAVE MODE ON!")
+        time.sleep(5)
         
     last_uid = uid
