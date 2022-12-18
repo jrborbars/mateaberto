@@ -4,7 +4,7 @@ import ure
 import time
 
 ap_ssid = "WifiManager"
-ap_password = "tayfunulu"
+ap_password = "Matehackers"
 ap_authmode = 3  # WPA2
 
 NETWORK_PROFILES = 'wifi.dat'
@@ -268,8 +268,8 @@ def start(port=80):
     server_socket = socket.socket()
     server_socket.bind(addr)
     server_socket.listen(1)
-
-    print('Connect to WiFi ssid ' + ap_ssid + ', default password: ' + ap_password)
+    # + ap_password
+    print('Connect to WiFi ssid ' + ap_ssid + ', default password: XXXXXXXXXXX')
     print('and access the ESP via your favorite web browser at 192.168.4.1.')
     print('Listening on:', addr)
 
