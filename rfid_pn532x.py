@@ -26,11 +26,14 @@ try:
         print('#3 - MASTER key ok.')
     else:
         db[b"MASTER"] = b"8:1a:83:35"
+        db[b"BORBA"] = b'b5:e6:d7:3f'
+
         db.flush()
         print('#3 - MASTER key created.'+str(db[b"MASTER"])[:-3])
 except OSError as err:
     print('#2 - DB was not opened.', str(err), ' Exiting....')
     raise SystemExit
+
 
 # I2C PINS
 #ESP32-C3
@@ -41,8 +44,13 @@ SCL = Pin(6, pull=Pin.PULL_UP)
 RFID_ID = 36 #0x24
 OLED_ID = 60 #0x3c
 ####################
-OLED_W = 128
-OLED_H = 64
+# LCD 0.96"
+#OLED_W = 128
+#OLED_H = 64
+# LCD 0.42"
+OLED_W = 72
+OLED_H = 40
+
 
 LED_PIN = Pin(2)
 LED = neopixel.NeoPixel(LED_PIN,1)
@@ -71,29 +79,39 @@ else:
     print("#4 - Network connection OK.")
 time.sleep(5)
 
-#oled = ssd1306.SSD1306_I2C(OLED_W, OLED_H, i2c)
+oled = ssd1306.SSD1306_I2C(OLED_W, OLED_H, i2c)
 time.sleep(3)
 
-#ntptime.host = '201.49.148.135'
-ntptime.host = '200.20.186.76'
-#ntptime.host = 'br.pool.ntp.org'
+NTP_HOST = [    'br.pool.ntp.org',
+                '200.20.186.76',
+                '201.49.148.135', 
+                '200.160.7.186',
+                '200.186.125.195',
+                '200.189.40.8',
+                '200.192.232.8'
+                ]
 NTP_FLAG = True
 counter = 0
 
-while NTP_FLAG:
+while NTP_FLAG and counter < 7:
+    ntptime.host = NTP_HOST[counter]
+    print("NTP HOST ",NTP_HOST[counter])
+    time.sleep(1)
     try:
         ntptime.settime()	# this queries the time from an NTP server
     except OSError as err:
-        if str(err).split(' ')[2] == "ETIMEDOUT":
-            if counter > 5:
-                break
+        print(str(err).split(' '))
+        if len(str(err).split(' ')[0]) == 4:
+            print("NTP Error ",err)
+            NTP_FLAG = False
+        elif str(err).split(' ')[2] == "ETIMEDOUT":
             print("NTP Error ",err, f" Trying again[{counter}]...")
-            time.sleep(2)
+            time.sleep(1)
         else:
             print("NTP Error ",err)
-            #print(str(err).split(' ')[2])
             NTP_FLAG = False
     counter += 1
+
 print('#5 - UTC TIME: ',time.localtime())
 
 def scan_i2c(iic):
@@ -117,15 +135,11 @@ def scan_i2c(iic):
 
 scan_i2c(i2c)            
 
-pn532 = pn532_i2c.PN532_I2C(i2c, debug=True)
-#ic, ver, rev, support = pn532.get_firmware_version()
+pn532 = pn532_i2c.PN532_I2C(i2c, debug=False)
+ic, ver, rev, support = pn532.get_firmware_version()
 
 #scan_i2c(i2c2)
-#print(f"Found PN532 with firmware version: {ver}.{rev} | {ic}.{support}")
-#oled.text('Hello, World 1!', 0, 0)
-#oled.text('Hello, World 2!', 0, 10)
-#oled.text('Hello, World 3!', 0, 20)        
-#oled.show()
+print(f"Found PN532 with firmware version: {ver}.{rev} | {ic}.{support}")
 
 # Set up configuration for MiFare type cards
 print("#7 - Everything OK.")
@@ -139,24 +153,30 @@ while True:
     uid = pn532.read_passive_target(timeout=0.5)
     if uid is None:
         last_uid = None
-        #oled.fill(0)
-        #oled.show()
+        oled.fill(0)
+        oled.text('CARD:', 0, 0)
+        oled.text('Not found', 0, 1)
+        oled.show()
         continue
     if last_uid == uid and uid == MASTER:
         counter +=1
     else:
-        print(f"Found card. UID", [hex(i) for i in uid])
-        #oled.fill(0)
+        #print(f"Found card. UID", [hex(i) for i in uid])
         suid = ""
         for i in uid:
             if len(suid) > 0:
                 suid +=":"
             s = hex(i)[2:4]
             suid += s
-        #oled.text("UID found",0,0)
-        #oled.text(suid,0,10)
-        #oled.show()
-        print("SUID ",suid)
+        print("Found card. UID", suid)
+        oled.fill(0)
+        oled.text('CARD:', 0, 0)
+        oled.text(suid, 1, 0)
+        oled.show()
+        time.sleep(2)
+        oled.fill(0)
+        oled.show()
+        suid = bytes(suid,'utf-8')
         if save_mode:
             save_mode = False
             db_len = len(db)
@@ -172,19 +192,27 @@ while True:
             LED[0] = (0,0,0)
             LED.write()
         else:
-            if bytes(suid) in db:
-                print("ACCESS GRANTED!")
-                LED[0] = (0,255,0)
+            GRANTED_FLAG = False
+            for v in db.values():
+                if suid == v:
+                    GRANTED_FLAG = True
+                    print("ACCESS GRANTED!")
+                    LED[0] = (0,255,0)
+                    LED.write()
+                    time.sleep(3)
+                    LED[0] = (0,0,0)
+                    LED.write()
+            if not GRANTED_FLAG:
+                print("ACCESS DENIED!")
+                LED[0] = (255,0,0)
                 LED.write()
-                time.sleep(3)
+                time.sleep(1)
                 LED[0] = (0,0,0)
                 LED.write()
-            else:
-                print("ACCESS DENIED!")
     if counter == 10:
         counter = 0
         save_mode = True
         print("SAVE MODE ON!")
         time.sleep(5)
-        
+    time.sleep(1)
     last_uid = uid

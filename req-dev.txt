@@ -1,0 +1,11 @@
+bitstring==3.1.9
+cffi==1.15.1
+cryptography==38.0.4
+ecdsa==0.18.0
+esptool==4.4
+pycparser==2.21
+pyserial==3.5
+pyudev==0.24.0
+reedsolo==1.5.4
+rshell==0.0.31
+six==1.16.0
