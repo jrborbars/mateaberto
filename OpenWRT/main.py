@@ -76,7 +76,7 @@ async def index(request, device):
     return f"Ola, {user[0]}", 200
 
 #sslctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-#print(sys.version)
+print(sys.version)
 # if sys.version.split(' ')[1] == 'MicroPython':
 #     sslctx.load_cert_chain('cert.pem', 'key.pem')
 # else:
