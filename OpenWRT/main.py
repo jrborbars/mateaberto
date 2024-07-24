@@ -57,24 +57,26 @@ async def not_found(request):
 @app.post('/user_check/<int:device>/')
 async def index(request, device):
     try:
-        if device > 10:
-            #raise ValueError
-            return 'Unauthorized', 401
-        passwd = request.json
-        print("PASSWD", request.json)
+        if device < 0 or device > 10:
+            raise ValueError
+        passwd = request.json['passwd']
+        if passwd is None:
+            raise ValueError
     except ValueError:
-        return 'Unauthorized', 401
+        return 'Unauthorized_1', 401
+    except Exception:
+        return 'Bad_request', 400
 
     con = usqlite.connect("data.db")
     res = con.execute(f"SELECT name from users WHERE secret_device{device}=?",passwd)
     user = res.fetchone()
     con.close()
     if not user:
-        return 'Unauthorized', 401
+        return 'Unauthorized_3', 401
     return f"Ola, {user[0]}", 200
 
 #sslctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-print(sys.version)
+#print(sys.version)
 # if sys.version.split(' ')[1] == 'MicroPython':
 #     sslctx.load_cert_chain('cert.pem', 'key.pem')
 # else:
