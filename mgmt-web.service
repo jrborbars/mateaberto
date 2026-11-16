@@ -1,0 +1,15 @@
+[Unit]
+Description=Management Web Server (Admin API)
+After=network.target doorlock.service
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/remote
+EnvironmentFile=/mnt/remote/.env
+ExecStart=/mnt/remote/.venv/bin/hypercorn mgmt_web:app --bind 127.0.0.1:8443 --keyfile /mnt/remote/certs/mgmt-web.key --certfile /mnt/remote/certs/mgmt-web.crt
+Restart=always
+RestartSec=5
+User=ricardo
+
+[Install]
+WantedBy=multi-user.target

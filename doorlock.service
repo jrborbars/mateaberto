@@ -1,0 +1,15 @@
+[Unit]
+Description=Doorlock PIN Verification Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/remote
+EnvironmentFile=/mnt/remote/.env
+ExecStart=/mnt/remote/.venv/bin/hypercorn app:app --bind 0.0.0.0:8000
+Restart=always
+RestartSec=5
+User=ricardo
+
+[Install]
+WantedBy=multi-user.target
