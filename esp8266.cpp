@@ -24,7 +24,6 @@
 const int RELAY_PIN = 0;   // GPIO-0 drives the door relay
 ESP8266WebServer server(ESP_HTTP_PORT);
 
-
 // ---- State ----
 String userBuffer = "";
 String pinBuffer  = "";
@@ -85,7 +84,6 @@ void loop() {
 
   // --- Handle HTTP server requests ---
   server.handleClient();
-  
 
   // --- Keypad serial input ---
   while (Serial.available() > 0) {
@@ -203,7 +201,6 @@ void sendCredentialsToAPI(String userNo, String pinNo) {
 
   http.end();
 }
-
 
 void handleStatusRequest() {
   JsonDocument doc;

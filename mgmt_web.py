@@ -39,6 +39,7 @@ if config_errors:
         log.critical(f"Configuration error: {err}")
     sys.exit(1)
 
+
 if not config.ADMIN_SECRET_TOKEN:
     log.critical("ADMIN_SECRET_TOKEN not set in .env — refusing to start")
     sys.exit(1)
@@ -438,7 +439,6 @@ def main() -> None:
     hypercorn_config.use_reloader = False
     hypercorn_config.certfile = config.MGMT_TLS_CERT
     hypercorn_config.keyfile = config.MGMT_TLS_KEY
-
     asyncio.run(hypercorn.asyncio.serve(app, hypercorn_config))
 
 

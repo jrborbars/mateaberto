@@ -25,7 +25,6 @@ from doorlock_common import (
     get_esp_status,
 )
 
-
 # ---------------------------------------------------------------------------
 # Logging (structured, exceptions only in logs — never in responses)
 # ---------------------------------------------------------------------------
@@ -35,7 +34,6 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 log = logging.getLogger("doorlock")
-
 
 # Validate configuration on startup
 config_errors = config.validate_config()
@@ -127,8 +125,6 @@ def init_db() -> None:
             log.info("Database initialized. Default user: 5551234 (legacy SHA-256, will migrate on first login).")
 
         conn.commit()
-
-
 
 # ---------------------------------------------------------------------------
 # Rate limiting (persistent, per username + IP)
