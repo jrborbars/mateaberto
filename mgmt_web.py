@@ -20,6 +20,7 @@ from doorlock_common import (
     validate_pin,
 )
 
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -29,6 +30,7 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 log = logging.getLogger("mgmt-web")
+
 
 # Validate configuration on startup
 config_errors = config.validate_config()
@@ -438,6 +440,7 @@ def main() -> None:
     hypercorn_config.keyfile = config.MGMT_TLS_KEY
 
     asyncio.run(hypercorn.asyncio.serve(app, hypercorn_config))
+
 
 
 if __name__ == "__main__":

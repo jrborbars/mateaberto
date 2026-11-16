@@ -25,6 +25,7 @@ from doorlock_common import (
     get_esp_status,
 )
 
+
 # ---------------------------------------------------------------------------
 # Logging (structured, exceptions only in logs — never in responses)
 # ---------------------------------------------------------------------------
@@ -35,6 +36,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("doorlock")
 
+
 # Validate configuration on startup
 config_errors = config.validate_config()
 if config_errors:
@@ -43,8 +45,10 @@ if config_errors:
     sys.exit(1)
 
 
+
 def init_db() -> None:
     """Ensure tables exist and migrate legacy SHA-256 hashes."""
+
     import hashlib
     with db_conn(write=True) as conn:
         cur = conn.cursor()
@@ -125,6 +129,7 @@ def init_db() -> None:
         conn.commit()
 
 
+
 # ---------------------------------------------------------------------------
 # Rate limiting (persistent, per username + IP)
 # ---------------------------------------------------------------------------
@@ -161,6 +166,7 @@ def record_failure(conn: sqlite3.Connection, username: str, ip_address: str) -> 
 
     if new_count >= config.RATE_LIMIT_MAX_FAIL:
         penalty = config.RATE_LIMIT_BASE_PENALTY_S * (new_count - config.RATE_LIMIT_MAX_FAIL + 1)
+
         lockout_until = time.time() + penalty
         conn.execute(
             "UPDATE failed_attempts SET lockout_until = ? WHERE username = ? AND ip_address = ?",
@@ -270,6 +276,7 @@ async def verify_pin_endpoint():
 
         log.info("Access GRANTED for user=%s from %s — sending open command to ESP8266", input_user, client_ip)
         send_esp_open_command()
+
         return jsonify({"status": "granted", "user": input_user}), 200
 
     # --- Failed auth ---
@@ -293,6 +300,7 @@ async def health():
             "service": "doorlock",
             "esp_status": esp_status
         }), 200
+
     except Exception as exc:  # noqa: BLE001
         log.exception("Health check failed: %s", exc)
         return jsonify({"status": "error", "service": "doorlock"}), 503
