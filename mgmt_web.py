@@ -7,36 +7,18 @@ Only this service may INSERT/UPDATE/DELETE on the `users` table.
 import asyncio
 import hmac
 import logging
-import os
 import sqlite3
 import sys
-import time
-from contextlib import contextmanager
 
-from argon2 import PasswordHasher
-from dotenv import load_dotenv
 from quart import Quart, request, jsonify
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-load_dotenv()
-
-MGMT_HOST = os.getenv("MGMT_HOST", "127.0.0.1")
-MGMT_PORT = int(os.getenv("MGMT_PORT", "8443"))
-MGMT_TLS_CERT = os.getenv("MGMT_TLS_CERT", "certs/mgmt-web.crt")
-MGMT_TLS_KEY = os.getenv("MGMT_TLS_KEY", "certs/mgmt-web.key")
-ADMIN_SECRET_TOKEN = os.getenv("ADMIN_SECRET_TOKEN", "")
-
-DOORLOCK_DB_PATH = os.getenv("DOORLOCK_DB_PATH", "door_access.db")
-
-ARGON2_TIME_COST = int(os.getenv("ARGON2_TIME_COST", "3"))
-ARGON2_MEMORY_COST = int(os.getenv("ARGON2_MEMORY_COST", "65536"))
-ARGON2_PARALLELISM = int(os.getenv("ARGON2_PARALLELISM", "4"))
-
-if not ADMIN_SECRET_TOKEN:
-    logging.critical("ADMIN_SECRET_TOKEN not set in .env — refusing to start")
-    sys.exit(1)
+import config
+from doorlock_common import (
+    db_conn,
+    hash_pin,
+    validate_username,
+    validate_pin,
+)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -48,38 +30,16 @@ logging.basicConfig(
 )
 log = logging.getLogger("mgmt-web")
 
-# ---------------------------------------------------------------------------
-# Argon2 hasher
-# ---------------------------------------------------------------------------
-ph = PasswordHasher(
-    time_cost=ARGON2_TIME_COST,
-    memory_cost=ARGON2_MEMORY_COST,
-    parallelism=ARGON2_PARALLELISM,
-    hash_len=32,
-    salt_len=16,
-)
+# Validate configuration on startup
+config_errors = config.validate_config()
+if config_errors:
+    for err in config_errors:
+        log.critical(f"Configuration error: {err}")
+    sys.exit(1)
 
-
-def hash_pin(pin: str) -> str:
-    return ph.hash(pin)
-
-
-# ---------------------------------------------------------------------------
-# Database helpers
-# ---------------------------------------------------------------------------
-@contextmanager
-def db_conn(write: bool = False):
-    conn = sqlite3.connect(DOORLOCK_DB_PATH, timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=30000")
-    conn.execute("PRAGMA foreign_keys=ON")
-    try:
-        yield conn
-        if write:
-            conn.commit()
-    finally:
-        conn.close()
+if not config.ADMIN_SECRET_TOKEN:
+    log.critical("ADMIN_SECRET_TOKEN not set in .env — refusing to start")
+    sys.exit(1)
 
 
 def init_db() -> None:
@@ -183,29 +143,7 @@ def audit(actor: str, action: str, target_username: str | None, ip: str, details
 # ---------------------------------------------------------------------------
 # Input validation
 # ---------------------------------------------------------------------------
-import re  # noqa: E402
 
-USERNAME_RE = r"^[A-Za-z0-9._-]{3,64}$"
-
-
-def validate_username(username) -> str | None:
-    if not username or not isinstance(username, str):
-        return None
-    cleaned = username.strip()
-    if not cleaned:
-        return None
-    if not re.match(USERNAME_RE, cleaned):
-        return None
-    return cleaned
-
-
-def validate_pin(pin) -> str | None:
-    if not pin or not isinstance(pin, str):
-        return None
-    cleaned = pin.strip()
-    if len(cleaned) < 8 or len(cleaned) > 64:
-        return None
-    return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -493,13 +431,13 @@ def main() -> None:
     import hypercorn.asyncio
     from hypercorn.config import Config
 
-    config = Config()
-    config.bind = [f"{MGMT_HOST}:{MGMT_PORT}"]
-    config.certfile = MGMT_TLS_CERT
-    config.keyfile = MGMT_TLS_KEY
-    config.use_reloader = False
+    hypercorn_config = Config()
+    hypercorn_config.bind = [f"{config.MGMT_HOST}:{config.MGMT_PORT}"]
+    hypercorn_config.use_reloader = False
+    hypercorn_config.certfile = config.MGMT_TLS_CERT
+    hypercorn_config.keyfile = config.MGMT_TLS_KEY
 
-    asyncio.run(hypercorn.asyncio.serve(app, config))
+    asyncio.run(hypercorn.asyncio.serve(app, hypercorn_config))
 
 
 if __name__ == "__main__":

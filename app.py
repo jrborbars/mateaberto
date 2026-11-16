@@ -1,39 +1,29 @@
-"""Doorlock Service — PIN verification and relay trigger.
+"""Doorlock Service — PIN verification and ESP8266 relay command.
 
 Reads user credentials from SQLite but NEVER writes to the `users` table.
 All user management is handled exclusively by the Management Web Server.
+Relay control is delegated to ESP8266 via HTTP /open command.
 """
 
 import asyncio
-import hashlib
 import logging
-import os
 import sqlite3
 import sys
 import time
-from contextlib import contextmanager
 
-from argon2 import PasswordHasher, exceptions as argon2_exceptions
-from dotenv import load_dotenv
 from quart import Quart, request, jsonify
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-load_dotenv()
-
-DOORLOCK_HOST = os.getenv("DOORLOCK_HOST", "0.0.0.0")
-DOORLOCK_PORT = int(os.getenv("DOORLOCK_PORT", "8000"))
-DOORLOCK_DB_PATH = os.getenv("DOORLOCK_DB_PATH", "door_access.db")
-RELAY_GPIO = int(os.getenv("RELAY_GPIO", "0"))
-RELAY_ACTIVE_MS = int(os.getenv("RELAY_ACTIVE_MS", "3000"))
-
-RATE_LIMIT_MAX_FAIL = int(os.getenv("RATE_LIMIT_MAX_FAIL", "3"))
-RATE_LIMIT_BASE_PENALTY_S = int(os.getenv("RATE_LIMIT_BASE_PENALTY_S", "30"))
-
-ARGON2_TIME_COST = int(os.getenv("ARGON2_TIME_COST", "3"))
-ARGON2_MEMORY_COST = int(os.getenv("ARGON2_MEMORY_COST", "65536"))
-ARGON2_PARALLELISM = int(os.getenv("ARGON2_PARALLELISM", "4"))
+import config
+from doorlock_common import (
+    db_conn,
+    hash_pin,
+    verify_pin,
+    is_legacy_sha256_hash,
+    validate_username,
+    validate_pin,
+    send_esp_open_command,
+    get_esp_status,
+)
 
 # ---------------------------------------------------------------------------
 # Logging (structured, exceptions only in logs — never in responses)
@@ -45,59 +35,17 @@ logging.basicConfig(
 )
 log = logging.getLogger("doorlock")
 
-# ---------------------------------------------------------------------------
-# Argon2 hasher
-# ---------------------------------------------------------------------------
-ph = PasswordHasher(
-    time_cost=ARGON2_TIME_COST,
-    memory_cost=ARGON2_MEMORY_COST,
-    parallelism=ARGON2_PARALLELISM,
-    hash_len=32,
-    salt_len=16,
-)
-
-
-def hash_pin(pin: str) -> str:
-    """Hash a PIN with argon2 (per-user salt, memory-hard)."""
-    return ph.hash(pin)
-
-
-def verify_pin(hashed_pin: str, input_pin: str) -> bool:
-    """Verify a PIN against an argon2 hash (constant-time)."""
-    try:
-        return ph.verify(hashed_pin, input_pin)
-    except argon2_exceptions.VerifyMismatchError:
-        return False
-    except argon2_exceptions.InvalidHashError:
-        # Legacy SHA-256 hash — fall back for migration
-        return hashlib.sha256(input_pin.encode()).hexdigest() == hashed_pin
-
-
-def is_legacy_sha256_hash(hashed_pin: str) -> bool:
-    """Detect if a stored hash is a legacy unsalted SHA-256 (64 hex chars, no $)."""
-    return len(hashed_pin) == 64 and all(c in "0123456789abcdef" for c in hashed_pin)
-
-# ---------------------------------------------------------------------------
-# Database helpers (WAL, busy_timeout, read-only for users table)
-# ---------------------------------------------------------------------------
-@contextmanager
-def db_conn(write: bool = False):
-    """Yield a SQLite connection with WAL mode and busy_timeout."""
-    conn = sqlite3.connect(DOORLOCK_DB_PATH, timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=30000")
-    conn.execute("PRAGMA foreign_keys=ON")
-    try:
-        yield conn
-        if write:
-            conn.commit()
-    finally:
-        conn.close()
+# Validate configuration on startup
+config_errors = config.validate_config()
+if config_errors:
+    for err in config_errors:
+        log.critical(f"Configuration error: {err}")
+    sys.exit(1)
 
 
 def init_db() -> None:
     """Ensure tables exist and migrate legacy SHA-256 hashes."""
+    import hashlib
     with db_conn(write=True) as conn:
         cur = conn.cursor()
         cur.execute(
@@ -176,35 +124,6 @@ def init_db() -> None:
 
         conn.commit()
 
-# ---------------------------------------------------------------------------
-# Input validation
-# ---------------------------------------------------------------------------
-import re  # noqa: E402
-
-USERNAME_RE = r"^[A-Za-z0-9._-]{3,64}$"
-
-
-def validate_username(username: str) -> str | None:
-    """Return cleaned username or None if invalid."""
-    if not username or not isinstance(username, str):
-        return None
-    cleaned = username.strip()
-    if not cleaned:
-        return None
-    if not re.match(USERNAME_RE, cleaned):
-        return None
-    return cleaned
-
-
-def validate_pin(pin: str) -> str | None:
-    """Return cleaned pin or None if invalid."""
-    if not pin or not isinstance(pin, str):
-        return None
-    cleaned = pin.strip()
-    if len(cleaned) < 8 or len(cleaned) > 64:
-        return None
-    return cleaned
-
 
 # ---------------------------------------------------------------------------
 # Rate limiting (persistent, per username + IP)
@@ -240,8 +159,8 @@ def record_failure(conn: sqlite3.Connection, username: str, ip_address: str) -> 
             (new_count, username, ip_address),
         )
 
-    if new_count >= RATE_LIMIT_MAX_FAIL:
-        penalty = RATE_LIMIT_BASE_PENALTY_S * (new_count - RATE_LIMIT_MAX_FAIL + 1)
+    if new_count >= config.RATE_LIMIT_MAX_FAIL:
+        penalty = config.RATE_LIMIT_BASE_PENALTY_S * (new_count - config.RATE_LIMIT_MAX_FAIL + 1)
         lockout_until = time.time() + penalty
         conn.execute(
             "UPDATE failed_attempts SET lockout_until = ? WHERE username = ? AND ip_address = ?",
@@ -349,7 +268,8 @@ async def verify_pin_endpoint():
 
             log_access(conn, input_user, "GRANTED", client_ip, "")
 
-        log.info("Access GRANTED for user=%s from %s", input_user, client_ip)
+        log.info("Access GRANTED for user=%s from %s — sending open command to ESP8266", input_user, client_ip)
+        send_esp_open_command()
         return jsonify({"status": "granted", "user": input_user}), 200
 
     # --- Failed auth ---
@@ -363,11 +283,16 @@ async def verify_pin_endpoint():
 
 @app.get("/api/health")
 async def health():
-    """Health check — verifies DB connectivity."""
+    """Health check — verifies DB connectivity and ESP8266 status."""
     try:
         with db_conn(write=False) as conn:
             conn.execute("SELECT 1").fetchone()
-        return jsonify({"status": "ok", "service": "doorlock"}), 200
+        esp_status = get_esp_status()
+        return jsonify({
+            "status": "ok",
+            "service": "doorlock",
+            "esp_status": esp_status
+        }), 200
     except Exception as exc:  # noqa: BLE001
         log.exception("Health check failed: %s", exc)
         return jsonify({"status": "error", "service": "doorlock"}), 503
@@ -390,11 +315,11 @@ def main() -> None:
     import hypercorn.asyncio
     from hypercorn.config import Config
 
-    config = Config()
-    config.bind = [f"{DOORLOCK_HOST}:{DOORLOCK_PORT}"]
-    config.use_reloader = False
+    hypercorn_config = Config()
+    hypercorn_config.bind = [f"{config.DOORLOCK_HOST}:{config.DOORLOCK_PORT}"]
+    hypercorn_config.use_reloader = False
 
-    asyncio.run(hypercorn.asyncio.serve(app, config))
+    asyncio.run(hypercorn.asyncio.serve(app, hypercorn_config))
 
 
 if __name__ == "__main__":

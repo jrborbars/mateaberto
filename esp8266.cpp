@@ -18,19 +18,11 @@
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
 #include <ArduinoJson.h>
-
-// ---- Compile-time configuration (set these before flashing) ----
-#ifndef WIFI_SSID
-#define WIFI_SSID     "YOUR_WIFI_SSID"
-#endif
-#ifndef WIFI_PASSWORD
-#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
-#endif
-#ifndef API_URL
-#define API_URL       "http://192.168.22.13:8000/api/verify-pin"
-#endif
+#include <ESP8266WebServer.h>
+#include "esp_secrets.h"
 
 const int RELAY_PIN = 0;   // GPIO-0 drives the door relay
+ESP8266WebServer server(ESP_HTTP_PORT);
 
 // ---- State ----
 String userBuffer = "";
@@ -46,6 +38,10 @@ const unsigned long RELAY_ACTIVE_MS = 3000;
 unsigned long lastWiFiCheckMs = 0;
 const unsigned long WIFI_CHECK_INTERVAL_MS = 10000;
 
+// Server request handling
+void handleStatusRequest();
+void handleOpenRequest();
+
 void setup() {
   Serial.begin(9600);
   pinMode(RELAY_PIN, OUTPUT);
@@ -57,6 +53,12 @@ void setup() {
     Serial.print(".");
   }
   Serial.println("\nWiFi connected. IP: " + WiFi.localIP().toString());
+  
+  // Start HTTP server
+  server.on("/status", handleStatusRequest);
+  server.on("/open", handleOpenRequest);
+  server.begin();
+  Serial.println("HTTP server started on port " + String(ESP_HTTP_PORT));
 }
 
 void loop() {
@@ -80,6 +82,9 @@ void loop() {
     Serial.println("Relay OFF (timeout)");
   }
 
+  // --- Handle HTTP server requests ---
+  server.handleClient();
+  
   // --- Keypad serial input ---
   while (Serial.available() > 0) {
     char inChar = (char)Serial.read();
@@ -195,4 +200,37 @@ void sendCredentialsToAPI(String userNo, String pinNo) {
   }
 
   http.end();
+}
+
+void handleStatusRequest() {
+  JsonDocument doc;
+  doc["status"] = "ok";
+  doc["wifi_rssi"] = WiFi.RSSI();
+  doc["uptime_ms"] = millis();
+  doc["relay_active"] = relayActive;
+  doc["free_heap"] = ESP.getFreeHeap();
+  
+  String response;
+  serializeJson(doc, response);
+  server.send(200, "application/json", response);
+}
+
+void handleOpenRequest() {
+  if (!relayActive) {
+    triggerRelay();
+    JsonDocument doc;
+    doc["status"] = "ok";
+    doc["message"] = "Relay activated";
+    String response;
+    serializeJson(doc, response);
+    server.send(200, "application/json", response);
+    Serial.println("Received open command from server");
+  } else {
+    JsonDocument doc;
+    doc["status"] = "ok";
+    doc["message"] = "Relay already active";
+    String response;
+    serializeJson(doc, response);
+    server.send(200, "application/json", response);
+  }
 }
